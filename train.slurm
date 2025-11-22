@@ -118,7 +118,9 @@ LATEST_DIR="${LATEST_DIR%/}"
   --headless
 '
 
-# Push logs back with a remote lock to avoid concurrent rsync races
-rsync -az --delete -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null" \
+rsync -az --delete \
+  --exclude='*.err' \
+  --exclude='*.out' \
+  -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null" \
   "${PERSISTENT_LOGS_DIR}/" \
   "${REMOTE_HOST}:${REMOTE_PROJECT}/logs/${SLURM_JOB_ID}/"
