@@ -79,11 +79,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # reward scales
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
-
-
-# revision history ### <- mine
-    ### reward scales
-    lin_vel_reward_scale = 1.0
-    yaw_rate_reward_scale = 0.5
     base_orientation_reward_scale = 0.5   # 자세 안정
     base_height_reward_scale = 0.2        #
+
+
