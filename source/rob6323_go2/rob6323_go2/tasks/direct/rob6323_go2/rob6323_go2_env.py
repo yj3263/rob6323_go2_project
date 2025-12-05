@@ -101,7 +101,7 @@ class Rob6323Go2Env(DirectRLEnv):
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-        # linear velocity tracking
+        ### linear velocity tracking
         lin_vel_error = torch.sum(torch.square(self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]), dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
         # yaw rate tracking
@@ -114,6 +114,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # 완전히 수직이면 [0, 0, -1] 근처. x,y 성분이 클수록 많이 기울어진 것.
         tilt_error = torch.sum(torch.square(gravity_b[:, :2]), dim=1)  # g_x^2 + g_y^2
         base_orientation_reward = torch.exp(-tilt_error / 0.2)
+        
         ### base height stability
         base_height = self.robot.data.root_pos_w[:, 2]
         target_height = 0.35  # Go2 기본 높이 근처 값, 나중에 조정 가능

@@ -76,7 +76,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
     current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
 
-    # reward scales
+    ### reward scales
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
     base_orientation_reward_scale = 0.5   # 자세 안정
