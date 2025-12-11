@@ -101,16 +101,31 @@ class Rob6323Go2Env(DirectRLEnv):
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-        # linear velocity tracking
+        ### linear velocity tracking
         lin_vel_error = torch.sum(torch.square(self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]), dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
         # yaw rate tracking
         yaw_rate_error = torch.square(self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2])
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
+
+        ### base orientation stability (roll, pitch)
+        ### projected_gravity_b ≈ [g_x, g_y, g_z] in base frame
+        gravity_b = self.robot.data.projected_gravity_b
+        # 완전히 수직이면 [0, 0, -1] 근처. x,y 성분이 클수록 많이 기울어진 것.
+        tilt_error = torch.sum(torch.square(gravity_b[:, :2]), dim=1)  # g_x^2 + g_y^2
+        base_orientation_reward = torch.exp(-tilt_error / 0.2)
         
+        ### base height stability
+        base_height = self.robot.data.root_pos_w[:, 2]
+        target_height = 0.35  # Go2 기본 높이 근처 값, 나중에 조정 가능
+        height_error = torch.square(base_height - target_height)
+        base_height_reward = torch.exp(-height_error / 0.01)
+
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale * self.step_dt,
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale * self.step_dt,
+            "base_orientation_exp": base_orientation_reward * self.cfg.base_orientation_reward_scale * self.step_dt,
+            "base_height_exp": base_height_reward * self.cfg.base_height_reward_scale * self.step_dt,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
