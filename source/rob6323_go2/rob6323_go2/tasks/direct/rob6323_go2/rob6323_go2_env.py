@@ -45,16 +45,16 @@ class Rob6323Go2Env(DirectRLEnv):
             for key in [
                 "track_lin_vel_xy_exp",
                 "track_ang_vel_z_exp",
-                "rew_action_rate",     # <--- Added
-                "raibert_heuristic",   # <--- Added
+                "rew_action_rate",     # ★★★ Added
+                "raibert_heuristic",   # ★★★ Added
 
-                "orient",      # Non-vertical orientation
-                "lin_vel_z",   # Vertical linear velocity
-                "dof_vel",     # High joint velocity
-                "ang_vel_xy",  # Angular velocity in XY plane
+                "orient",      # ★★★ Non-vertical orientation
+                "lin_vel_z",   # ★★★ Vertical linear velocity
+                "dof_vel",     # ★★★ High joint velocity
+                "ang_vel_xy",  # ★★★ Angular velocity in XY plane
                 
-                "feet_clearance", # Feet clearance
-                "contact_forces", # Tracking contact forces
+                "feet_clearance", # ★★★ Feet clearance
+                "contact_forces", # ★★★ Tracking contact forces
             ]
         }
 
@@ -69,20 +69,22 @@ class Rob6323Go2Env(DirectRLEnv):
         self.torque_limits = cfg.torque_limits
 
         # Get specific body indices
-        self._base_id, _ = self._contact_sensor.find_bodies("base")
+        base_ids, _ = self._contact_sensor.find_bodies("base") ### index of base id -> int
+        self._base_id = base_ids[0] ###
 
         # self._feet_ids, _ = self._contact_sensor.find_bodies(".*foot")
+        # --- Feet name list (make it an attribute) ---
+        self.foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+
         self._feet_ids = []
-        foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
-        for name in foot_names:
+        for name in self.foot_names:
             id_list, _ = self.robot.find_bodies(name)
             self._feet_ids.append(id_list[0])
 
         self._feet_ids_sensor = []
-        for name in foot_names:
+        for name in self.foot_names:
             sensor_id_list, _ = self._contact_sensor.find_bodies(name)
-            self._feet_ids_sensor.append(sensor_id_list[0])
-        
+            self._feet_ids_sensor.append(sensor_id_list[0])        
         # self._undesired_contact_body_ids, _ = self._contact_sensor.find_bodies(".*thigh")
 
 
@@ -109,6 +111,7 @@ class Rob6323Go2Env(DirectRLEnv):
             self.scene.filter_collisions(global_prim_paths=[])
         # add articulation to scene
         self.scene.articulations["robot"] = self.robot
+        self.scene.sensors["contact_sensor"] = self._contact_sensor ### Add contact sensor to scene
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
@@ -122,17 +125,17 @@ class Rob6323Go2Env(DirectRLEnv):
 
     # Defines contact plan
     def _step_contact_targets(self):
-        frequencies = 3.
+        frequencies = 3.0 #★★★ 3 -> 2.5
         phases = 0.5
         offsets = 0.
         bounds = 0.
         durations = 0.5 * torch.ones((self.num_envs,), dtype=torch.float32, device=self.device)
         self.gait_indices = torch.remainder(self.gait_indices + self.step_dt * frequencies, 1.0)
 
-        foot_indices = [self.gait_indices + phases + offsets + bounds,
-                        self.gait_indices + offsets,
-                        self.gait_indices + bounds,
-                        self.gait_indices + phases]
+        foot_indices = [self.gait_indices + phases, # FL
+                        self.gait_indices + 0.0,    # FR
+                        self.gait_indices + 0.0,    # RL
+                        self.gait_indices + phases] # RR
 
         self.foot_indices = torch.remainder(torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0)
 
@@ -158,27 +161,37 @@ class Rob6323Go2Env(DirectRLEnv):
                                    smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 1) * (
                                            1 - smoothing_cdf_start(
                                        torch.remainder(foot_indices[0], 1.0) - 0.5 - 1)))
+        
         smoothing_multiplier_FR = (smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0)) * (
                 1 - smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 0.5)) +
                                    smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 1) * (
                                            1 - smoothing_cdf_start(
                                        torch.remainder(foot_indices[1], 1.0) - 0.5 - 1)))
+        
         smoothing_multiplier_RL = (smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0)) * (
                 1 - smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 0.5)) +
                                    smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 1) * (
                                            1 - smoothing_cdf_start(
                                        torch.remainder(foot_indices[2], 1.0) - 0.5 - 1)))
+        
         smoothing_multiplier_RR = (smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0)) * (
                 1 - smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 0.5)) +
                                    smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 1) * (
                                            1 - smoothing_cdf_start(
                                        torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)))
 
+        # ★★★ Helper to avoid accidental foot order bugs
+        def _smooth_contact(x):
+            x = torch.remainder(x, 1.0)
+            return (
+                smoothing_cdf_start(x) * (1 - smoothing_cdf_start(x - 0.5))
+                + smoothing_cdf_start(x - 1) * (1 - smoothing_cdf_start(x - 1.5))
+            )
+
         self.desired_contact_states[:, 0] = smoothing_multiplier_FL
         self.desired_contact_states[:, 1] = smoothing_multiplier_FR
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
-    # ------------------------------------------------
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._actions = actions.clone()
@@ -222,7 +235,7 @@ class Rob6323Go2Env(DirectRLEnv):
                     self.robot.data.joint_pos - self.robot.data.default_joint_pos,
                     self.robot.data.joint_vel,
                     self._actions,
-                    self.clock_inputs  # Add gait phase info
+                    self.clock_inputs  #★★★ Add gait phase info
                 )
                 if tensor is not None
             ],
@@ -249,7 +262,6 @@ class Rob6323Go2Env(DirectRLEnv):
         self.last_actions = torch.roll(self.last_actions, 1, 2)
         self.last_actions[:, :, 0] = self._actions[:]
         
-        self._step_contact_targets() # Update gait state
         rew_raibert_heuristic = self._reward_raibert_heuristic()
 
         # 5.2 Implement Reward Terms
@@ -258,9 +270,12 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1)
         rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
 
+        # ★★★ Use continuous swing weight instead of a hard threshold
+        swing_weight = 1.0 - self.desired_contact_states  # (N, 4), 1=swing, 0=stance  # ★★★
+
         # 6.3 Advanced Foot Interaction
         # Feet Clearance
-        target_height = 0.1  # Target (10cm)
+        target_height = 0.07  # ★★★ 0.1 -> 0.07 
         is_swing = self.desired_contact_states < 0.5
         foot_pos_z = self.foot_positions_w[:, :, 2]
         error_clearance = (target_height - foot_pos_z).clip(min=0.0)
@@ -269,7 +284,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # B. Contact Forces
         foot_forces_z = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2]
         force_error = foot_forces_z * is_swing
-        # 4.0(Scale) * 1.0(Max Reward) = +4.0 보상
+        # ★★★ 4.0(Scale) * 1.0(Max Reward)
         rew_contact_forces = torch.exp(-torch.sum(torch.square(force_error), dim=1) / 400.0)
 
         # Add to rewards dict
@@ -297,8 +312,14 @@ class Rob6323Go2Env(DirectRLEnv):
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        net_contact_forces = self._contact_sensor.data.net_forces_w_history
-        cstr_termination_contacts = torch.any(torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 1.0, dim=1)
+        # net_contact_forces = self._contact_sensor.data.net_forces_w_history
+        # cstr_termination_contacts = torch.any(torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 1.0, dim=1)
+        
+        net_contact_forces = self._contact_sensor.data.net_forces_w_history  # ★★★ (N, H, B, 3)
+        base_force_mag = torch.linalg.norm(
+            net_contact_forces[:, :, self._base_id, :], dim=-1
+        )  # ★★★ (N, H)
+        cstr_termination_contacts = base_force_mag.max(dim=1).values > 1.0  # ★★★(N,)
         cstr_upsidedown = self.robot.data.projected_gravity_b[:, 2] > 0
 
         # terminate if base is too low
@@ -325,7 +346,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.last_actions[env_ids] = 0. 
 
         # Sample new commands
-        self._commands[env_ids] = torch.zeros_like(self._commands[env_ids]).uniform_(-1.0, 1.0)
+        self._commands[env_ids] = torch.zeros_like(self._commands[env_ids]).uniform_(-0.5, 0.5) ### 1.0 -> 0.5
         # Reset robot state
         joint_pos = self.robot.data.default_joint_pos[env_ids]
         joint_vel = self.robot.data.default_joint_vel[env_ids]
@@ -396,7 +417,7 @@ class Rob6323Go2Env(DirectRLEnv):
             footsteps_in_body_frame[:, i, :] = math_utils.quat_apply_yaw(math_utils.quat_conjugate(self.robot.data.root_quat_w),
                                                             cur_footsteps_translated[:, i, :])
 
-        # nominal positions: [FR, FL, RR, RL]
+        # nominal positions: [FL, FR, RL, RR]
         desired_stance_width = 0.25
         desired_ys_nom = torch.tensor([desired_stance_width / 2, -desired_stance_width / 2, desired_stance_width / 2, -desired_stance_width / 2], device=self.device).unsqueeze(0)
 
